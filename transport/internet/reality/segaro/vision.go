@@ -237,7 +237,7 @@ func isFakePacketsValid(multiBuff *buf.MultiBuffer, authKey []byte, clientTime *
 		fakePacketBuff.Clear()
 		timeInterval := int64(((counter + 1) * int(b.Len())) + minRandSize)
 		generateRandomPacket(fakePacketBuff, authKey, timeInterval, minRandSize, clientTime)
-		if !bytes.Equal(b.BytesTo(int32(minRandSize)), fakePacketBuff.Bytes()) {
+		if b.Len() < int32(minRandSize) || !bytes.Equal(b.BytesTo(int32(minRandSize)), fakePacketBuff.Bytes()) {
 			return errors.New("fake packets incorrect!")
 		}
 	}
