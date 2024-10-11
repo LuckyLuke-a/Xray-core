@@ -25,7 +25,7 @@ import (
 	"time"
 	"unsafe"
 
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/LuckyLuke-a/utls"
 	"github.com/LuckyLuke-a/reality"
 	"github.com/luckyluke-a/xray-core/common/errors"
 	"github.com/luckyluke-a/xray-core/common/net"
@@ -38,7 +38,7 @@ import (
 
 //go:generate go run github.com/luckyluke-a/xray-core/common/errors/errorgen
 
-//go:linkname aesgcmPreferred github.com/refraction-networking/utls.aesgcmPreferred
+//go:linkname aesgcmPreferred github.com/LuckyLuke-a/utls.aesgcmPreferred
 func aesgcmPreferred(ciphers []uint16) bool
 
 type Conn struct {

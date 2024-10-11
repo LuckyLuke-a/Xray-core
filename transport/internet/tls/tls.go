@@ -7,7 +7,7 @@ import (
 	"math/big"
 	"time"
 
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/LuckyLuke-a/utls"
 	"github.com/luckyluke-a/xray-core/common/buf"
 	"github.com/luckyluke-a/xray-core/common/net"
 )

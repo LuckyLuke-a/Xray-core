@@ -32,7 +32,7 @@ import (
 	"github.com/luckyluke-a/xray-core/transport/internet/reality/segaro"
 	"github.com/luckyluke-a/xray-core/transport/internet/stat"
 	"github.com/luckyluke-a/xray-core/transport/internet/tls"
-	utls "github.com/refraction-networking/utls"
+	utls "github.com/LuckyLuke-a/utls"
 )
 
 func init() {
