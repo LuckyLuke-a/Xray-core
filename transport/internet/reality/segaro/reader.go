@@ -47,8 +47,7 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 	minServerRandSize, maxServerRandSize := segaroConfig.GetServerRandPacketSize()
 	minServerRandCount, maxServerRandCount := segaroConfig.GetServerRandPacketCount()
 
-	minClientRandSize, maxClientRandSize := segaroConfig.GetClientRandPacketSize()
-	minClientRandCount, maxClientRandCount := segaroConfig.GetClientRandPacketCount()
+	minClientRandSize, _ := segaroConfig.GetClientRandPacketSize()
 
 	var minRandSize int
 	if fromInbound {
@@ -122,7 +121,7 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 						// Send fake packets
 						if fromInbound && sendFakePacket {
 							sendFakePacket = false
-							if err := sendMultipleFakePacket(authKey, &conn, nil, clientTime, minServerRandSize, maxServerRandSize, minServerRandCount, maxServerRandCount, true); err != nil {
+							if err := sendMultipleFakePacket(authKey, &conn, nil, nil, clientTime, minServerRandSize, maxServerRandSize, minServerRandCount, maxServerRandCount, true); err != nil {
 								return err
 							}
 							xsvCanContinue <- true // ServerSide
@@ -144,12 +143,11 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 								}
 
 							} else {
-								if cacheMultiBuffer[0].Len() > 2 {
-									if !(fromInbound && (maxClientRandCount == 0 || maxClientRandSize == 0 || minClientRandCount == 0 || minClientRandSize == 0)) && isHandshakeMessage(cacheMultiBuffer[0].BytesTo(3)) {
-										recievedFakePacket = true
-										canDecrypt = false
-									}
+								if cacheMultiBuffer[0].Len() > 2 && shouldProcessMessage(cacheMultiBuffer[0].BytesTo(3)) {
+									recievedFakePacket = true
+									canDecrypt = false
 								}
+
 								if err := writer.WriteMultiBuffer(cacheMultiBuffer); err != nil {
 									return err
 								}
@@ -182,7 +180,7 @@ func readFullBuffer(b *buf.Buffer, cacheMultiBuffer *buf.MultiBuffer, totalLengt
 
 	if *totalLength != 0 {
 		canRead = true
-	} else if b.Len() >= int32(paddingSize)+7 && isHandshakeMessage(b.BytesRange(int32(paddingSize)+4, int32(paddingSize)+7)) {
+	} else if b.Len() >= int32(paddingSize)+7 && shouldProcessMessage(b.BytesRange(int32(paddingSize)+4, int32(paddingSize)+7)) {
 		*totalLength = binary.BigEndian.Uint16(b.BytesTo(2))
 		b.Advance(2) // Skip total length bytes
 		canRead = true

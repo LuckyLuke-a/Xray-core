@@ -164,7 +164,7 @@ func GetPrivateField(v interface{}, fieldName string) (interface{}, error) {
 }
 
 // Send the multiple fake packet
-func sendMultipleFakePacket(authKey []byte, useConn *net.Conn, useWriter *buf.Writer, clientTime *time.Time, minRandSize, maxRandSize, minRandCount, maxRandCount int, sendHeader bool) error {
+func sendMultipleFakePacket(authKey []byte, useConn *net.Conn, useWriter *buf.Writer, buf2sent *buf.MultiBuffer, clientTime *time.Time, minRandSize, maxRandSize, minRandCount, maxRandCount int, sendHeader bool) error {
 	if maxRandCount == 0 || maxRandSize == 0 || minRandCount == 0 || minRandSize == 0 {
 		return nil
 	}
@@ -207,6 +207,31 @@ func sendMultipleFakePacket(authKey []byte, useConn *net.Conn, useWriter *buf.Wr
 		}
 	}
 
+	if buf2sent != nil {
+		fakePackets = append(*buf2sent, fakePackets...)
+		currentPacket := buf.New()
+		mergedPackets := buf.MultiBuffer{}
+		for i, buff := range fakePackets {
+			shouldMerge := rand.Float32() < 0.5 // 50% chance to merge
+			if currentPacket.Len()+buff.Len() <= buf.Size && (shouldMerge || i < 2) {
+				// Merge the buffer into the current packet
+				currentPacket.Write(buff.Bytes())
+			} else {
+				// Add current packet to mergedPackets and start a new one
+				if currentPacket.Len() > 0 {
+					mergedPackets = append(mergedPackets, currentPacket)
+				}
+				currentPacket = buff
+			}
+			buff = nil
+		}
+		// Add the last packet
+		if currentPacket.Len() > 0 {
+			mergedPackets = append(mergedPackets, currentPacket)
+		}
+		fakePackets = mergedPackets
+		mergedPackets, currentPacket = nil, nil
+	}
 	if useWriter != nil {
 		err := (*useWriter).WriteMultiBuffer(fakePackets)
 		if err != nil {
@@ -247,11 +272,15 @@ func isFakePacketsValid(multiBuff *buf.MultiBuffer, authKey []byte, clientTime *
 	return nil
 }
 
-func isHandshakeMessage(message []byte) bool {
-	if bytes.HasPrefix(message, proxy.TlsClientHandShakeStart) || bytes.HasPrefix(message, proxy.TlsServerHandShakeStart) || bytes.HasPrefix(message, proxy.TlsChangeCipherSpecStart) {
+func shouldProcessMessage(message []byte) bool {
+	if bytes.HasPrefix(message, proxy.TlsClientHandShakeStart) || bytes.HasPrefix(message, proxy.TlsServerHandShakeStart) || bytes.HasPrefix(message, proxy.TlsChangeCipherSpecStart) || isApplicationDataMessage(message) {
 		return true
 	}
 	return false
+}
+
+func isApplicationDataMessage(message []byte) bool {
+	return bytes.HasPrefix(message, proxy.TlsApplicationDataStart)
 }
 
 // getRealityAuthkey return the authKey and clientTime from conn (h2, grpc, tcp conn supported)

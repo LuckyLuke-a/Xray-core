@@ -67,7 +67,7 @@ func (w *SegaroWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 				return err
 			}
 			for _, b := range mb {
-				if b.Len() > 2 && !isHandshakeMessage(b.BytesTo(3)) {
+				if b.Len() < 3 || !shouldProcessMessage(b.BytesTo(3)) {
 					if err := w.Writer.WriteMultiBuffer(buf.MultiBuffer{b}); err != nil {
 						return err
 					}
@@ -83,26 +83,27 @@ func (w *SegaroWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 				// Add meta-data at the first of each chunk
 				for _, chunk := range cacheBuffer {
 					// Write chunk length
-					if _, err := chunk.WriteAtBeginning([]byte{byte(chunk.Len() >> 8), byte(chunk.Len())}); err != nil {
+					if _, err := chunk.WriteAtBeginning([]byte{
+						byte(chunk.Len() >> 8),
+						byte(chunk.Len()),
+					}); err != nil {
 						return err
 					}
 				}
-				if _, err := cacheBuffer[0].WriteAtBeginning([]byte{byte(cacheBuffer.Len() >> 8), byte(cacheBuffer.Len())}); err != nil {
+				if _, err := cacheBuffer[0].WriteAtBeginning([]byte{
+					byte(cacheBuffer.Len() >> 8),
+					byte(cacheBuffer.Len()),
+				}); err != nil {
 					return err
 				}
-
-				if err := w.Writer.WriteMultiBuffer(cacheBuffer); err != nil {
-					return err
-				}
-
-				if err := sendMultipleFakePacket(authKey, nil, &w.Writer, clientTime, minServerRandSize, maxServerRandSize, minServerRandCount, maxServerRandCount, false); err != nil {
+				if err := sendMultipleFakePacket(authKey, nil, &w.Writer, &cacheBuffer, clientTime, minServerRandSize, maxServerRandSize, minServerRandCount, maxServerRandCount, false); err != nil {
 					return err
 				}
 			}
 		} else {
 			// Client side
 			for i, b := range mb {
-				if i == 0 || (b.Len() > 2 && isHandshakeMessage(b.BytesTo(3))) {
+				if i == 0 || (b.Len() > 2 && shouldProcessMessage(b.BytesTo(3))) {
 					newTempBuff := []byte{}
 					if i == 0 {
 						// Add requestHeader
@@ -127,13 +128,21 @@ func (w *SegaroWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 						}
 					}
 
-					if i == 0{
-						if int(cacheBuffer[0].Len()) < minSplitSize {
+					if i == 0 {
+						firstBuffLen := int(cacheBuffer[0].Len())
+						if firstBuffLen < minSplitSize || len(cacheBuffer) == 1 {
 							// Use the long padding, to hide the first packet real length
 							paddingLength := rand.Intn(maxSplitSize-minSplitSize+1) + minSplitSize
 							var paddingBytes []byte
-							if paddingLength+int(cacheBuffer[0].Len()) > maxSplitSize {
-								paddingBytes = make([]byte, paddingLength-int(cacheBuffer[0].Len()))
+							if paddingLength+firstBuffLen > maxSplitSize {
+								if firstBuffLen < paddingLength {
+									paddingLength = paddingLength - firstBuffLen
+								} else if paddingLength < firstBuffLen {
+									paddingLength = firstBuffLen - paddingLength
+								} else {
+									paddingLength = rand.Intn(100)
+								}
+								paddingBytes = make([]byte, paddingLength)
 							} else {
 								paddingBytes = make([]byte, paddingLength)
 							}
@@ -141,7 +150,10 @@ func (w *SegaroWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 							if _, err := cacheBuffer[0].WriteAtBeginning(paddingBytes); err != nil {
 								return err
 							}
-							if _, err := cacheBuffer[0].WriteAtBeginning([]byte{byte(len(paddingBytes) >> 8), byte(len(paddingBytes))}); err != nil {
+							if _, err := cacheBuffer[0].WriteAtBeginning([]byte{
+								byte(len(paddingBytes) >> 8),
+								byte(len(paddingBytes)),
+							}); err != nil {
 								return err
 							}
 							paddingBytes = nil
@@ -151,7 +163,10 @@ func (w *SegaroWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 							}
 						}
 					}
-					if _, err := cacheBuffer[0].WriteAtBeginning([]byte{byte(cacheBuffer.Len() >> 8), byte(cacheBuffer.Len())}); err != nil {
+					if _, err := cacheBuffer[0].WriteAtBeginning([]byte{
+						byte(cacheBuffer.Len() >> 8),
+						byte(cacheBuffer.Len()),
+					}); err != nil {
 						return err
 					}
 				} else {
@@ -203,7 +218,7 @@ func SegaroWrite(reader buf.Reader, writer buf.Writer, timer signal.ActivityUpda
 			if !buffer.IsEmpty() {
 				timer.Update()
 				for _, b := range buffer {
-					if b.Len() > 2 && isHandshakeMessage(b.BytesTo(3)) {
+					if b.Len() > 2 && ((b.Len() < 1000 && isApplicationDataMessage(b.BytesTo(3)) && !fromInbound) || shouldProcessMessage(b.BytesTo(3))) {
 						newBuff := segaroAddPadding(b, minSplitSize, maxSplitSize, paddingSize, subChunkSize)
 
 						authKey, clientTime, err := getRealityAuthkey(&conn, fromInbound)
@@ -213,18 +228,20 @@ func SegaroWrite(reader buf.Reader, writer buf.Writer, timer signal.ActivityUpda
 
 						// Add meta-data at the first of each chunk
 						for _, chunk := range newBuff {
-							if _, err := chunk.WriteAtBeginning([]byte{byte(chunk.Len() >> 8), byte(chunk.Len())}); err != nil {
+							if _, err := chunk.WriteAtBeginning([]byte{
+								byte(chunk.Len() >> 8),
+								byte(chunk.Len()),
+							}); err != nil {
 								return err
 							}
 						}
-						if _, err := newBuff[0].WriteAtBeginning([]byte{byte(newBuff.Len() >> 8), byte(newBuff.Len())}); err != nil {
+						if _, err := newBuff[0].WriteAtBeginning([]byte{
+							byte(newBuff.Len() >> 8),
+							byte(newBuff.Len()),
+						}); err != nil {
 							return err
 						}
-						if err = writer.WriteMultiBuffer(newBuff); err != nil {
-							return err
-						}
-
-						if err := sendMultipleFakePacket(authKey, nil, &writer, clientTime, minRandSize, maxRandSize, minRandCount, maxRandCount, false); err != nil {
+						if err := sendMultipleFakePacket(authKey, nil, &writer, &newBuff, clientTime, minRandSize, maxRandSize, minRandCount, maxRandCount, false); err != nil {
 							return err
 						}
 
