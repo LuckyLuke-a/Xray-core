@@ -58,10 +58,10 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 
 	err = func() error {
 		var totalLength uint16 = 0
-		isFirstPacket, isFirstChunk, sendFakePacket := true, true, true
+		isFirstPacket, isFirstChunk, sendFakePacket, canDecrypt := true, true, true, true
 		recievedFakePacket := false
-		canDecrypt := true
 
+		var cacheBuffer *buf.Buffer
 		cacheMultiBuffer := buf.MultiBuffer{}
 
 		for {
@@ -130,8 +130,20 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 
 					for b.Len() > 0 {
 						if !canDecrypt && len(cacheMultiBuffer) == 0 {
-							totalLength = binary.BigEndian.Uint16(b.BytesTo(2))
-							b.Advance(2) // Skip total length
+							if cacheBuffer != nil {
+								totalLength = binary.BigEndian.Uint16([]byte{cacheBuffer.Byte(0), b.Byte(0)})
+								b.Advance(1)
+								cacheBuffer = nil
+							} else {
+								if b.Len() < 2 {
+									cacheBuffer = buf.New()
+									cacheBuffer.Write(b.Bytes())
+									b.Advance(b.Len())
+									continue
+								}
+								totalLength = binary.BigEndian.Uint16(b.BytesTo(2))
+								b.Advance(2) // Skip total length
+							}
 						}
 						err := readFullBuffer(b, &cacheMultiBuffer, &totalLength, canDecrypt, paddingSize, subChunkSize)
 						if err == nil {
