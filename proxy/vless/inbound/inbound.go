@@ -271,7 +271,9 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 			subChunkSize := int(segaroConfig.GetSubChunkSize())
 
 			decodedBuff := segaro.SegaroRemovePadding(buf.MultiBuffer{first}, paddingSize, subChunkSize)
-
+			if decodedBuff.Len() < 2{
+				return errors.New("decodedBuff lower than min length")
+			}
 			decodedBuff.Advance(2) // Skip requestHeader length
 			request, requestAddons, isfb, err = encoding.DecodeRequestHeader(isfb, decodedBuff, decodedBuff, h.validator)
 			first.ResetStart()
@@ -605,8 +607,8 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 			err = encoding.XtlsRead(clientReader, serverWriter, timer, connection, input, rawInput, trafficState, nil, ctx1)
 
 		case vless.XSV:
-			clientReader = segaro.NewSegaroReader(clientReader, trafficState)
-			err = segaro.SegaroRead(clientReader, serverWriter, timer, connection, trafficState, true, segaroConfig, xsvCanContinue)
+			clientReader = segaro.NewSegaroReader(clientReader)
+			err = segaro.SegaroRead(clientReader, serverWriter, timer, connection, true, segaroConfig, xsvCanContinue)
 
 		default:
 			// from clientReader.ReadMultiBuffer to serverWriter.WriteMultiBuffer

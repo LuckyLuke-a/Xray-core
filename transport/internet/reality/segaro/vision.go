@@ -22,8 +22,10 @@ import (
 )
 
 type SegaroConfig struct {
-	RealityConfig   *reality.Config
-	GoRealityConfig *goReality.Config
+	RealityConfig             *reality.Config
+	GoRealityConfig           *goReality.Config
+	CacheBuffer               []buf.MultiBuffer
+	NumberOfTLSPacketToFilter byte
 }
 
 func (sc *SegaroConfig) GetPaddingSize() uint32 {
@@ -272,8 +274,8 @@ func isFakePacketsValid(multiBuff *buf.MultiBuffer, authKey []byte, clientTime *
 	return nil
 }
 
-func shouldProcessMessage(message []byte) bool {
-	if bytes.HasPrefix(message, proxy.TlsClientHandShakeStart) || bytes.HasPrefix(message, proxy.TlsServerHandShakeStart) || bytes.HasPrefix(message, proxy.TlsChangeCipherSpecStart) || isApplicationDataMessage(message) {
+func isHandshakeMessage(message []byte) bool {
+	if bytes.HasPrefix(message, proxy.TlsClientHandShakeStart) || bytes.HasPrefix(message, proxy.TlsServerHandShakeStart) || bytes.HasPrefix(message, proxy.TlsChangeCipherSpecStart){
 		return true
 	}
 	return false

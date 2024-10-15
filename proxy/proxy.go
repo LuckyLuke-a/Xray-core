@@ -111,9 +111,6 @@ type TrafficState struct {
 	// write link state
 	IsPadding                bool
 	WriterSwitchToDirectCopy bool
-
-	// temporary cache the buffers
-	CacheBuffer []buf.MultiBuffer
 }
 
 func NewTrafficState(userUUID []byte) *TrafficState {

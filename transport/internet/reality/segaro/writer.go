@@ -9,22 +9,19 @@ import (
 	"github.com/luckyluke-a/xray-core/common/buf"
 	"github.com/luckyluke-a/xray-core/common/errors"
 	"github.com/luckyluke-a/xray-core/common/signal"
-	"github.com/luckyluke-a/xray-core/proxy"
 )
 
 // SegaroWriter is used to write xtls-segaro-vision
 type SegaroWriter struct {
 	buf.Writer
-	trafficState *proxy.TrafficState
 	segaroConfig *SegaroConfig
 	conn         net.Conn
 	initCall     bool
 }
 
-func NewSegaroWriter(writer buf.Writer, state *proxy.TrafficState, segaroConfig *SegaroConfig, conn net.Conn) *SegaroWriter {
+func NewSegaroWriter(writer buf.Writer, segaroConfig *SegaroConfig, conn net.Conn) *SegaroWriter {
 	return &SegaroWriter{
 		Writer:       writer,
-		trafficState: state,
 		segaroConfig: segaroConfig,
 		conn:         conn,
 	}
@@ -67,7 +64,7 @@ func (w *SegaroWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 				return err
 			}
 			for _, b := range mb {
-				if b.Len() < 3 || !shouldProcessMessage(b.BytesTo(3)) {
+				if b.Len() < 3 || !isHandshakeMessage(b.BytesTo(3)) {
 					if err := w.Writer.WriteMultiBuffer(buf.MultiBuffer{b}); err != nil {
 						return err
 					}
@@ -103,7 +100,7 @@ func (w *SegaroWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 		} else {
 			// Client side
 			for i, b := range mb {
-				if i == 0 || (b.Len() > 2 && shouldProcessMessage(b.BytesTo(3))) {
+				if i == 0 || (b.Len() > 2 && isHandshakeMessage(b.BytesTo(3))) {
 					newTempBuff := []byte{}
 					if i == 0 {
 						// Add requestHeader
@@ -182,7 +179,7 @@ func (w *SegaroWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 
 				// Add other chunks to cacheBuffer, if exist
 				if len(cacheBuffer) > 0 {
-					w.trafficState.CacheBuffer = append(w.trafficState.CacheBuffer, cacheBuffer)
+					w.segaroConfig.CacheBuffer = append(w.segaroConfig.CacheBuffer, cacheBuffer)
 				}
 			}
 		}
@@ -211,20 +208,30 @@ func SegaroWrite(reader buf.Reader, writer buf.Writer, timer signal.ActivityUpda
 		minRandSize, maxRandSize = segaroConfig.GetClientRandPacketSize()
 		minRandCount, maxRandCount = segaroConfig.GetClientRandPacketCount()
 	}
+	
+	authKey, clientTime, err := getRealityAuthkey(&conn, fromInbound)
+	if err != nil {
+		return err
+	}
 
-	err := func() error {
+	err = func() error {
 		for {
 			buffer, err := reader.ReadMultiBuffer()
 			if !buffer.IsEmpty() {
 				timer.Update()
 				for _, b := range buffer {
-					if b.Len() > 2 && ((b.Len() < 1000 && isApplicationDataMessage(b.BytesTo(3)) && !fromInbound) || shouldProcessMessage(b.BytesTo(3))) {
-						newBuff := segaroAddPadding(b, minSplitSize, maxSplitSize, paddingSize, subChunkSize)
-
-						authKey, clientTime, err := getRealityAuthkey(&conn, fromInbound)
-						if err != nil {
-							return err
+					usePadding := false
+					if b.Len() > 2 {
+						if isHandshakeMessage(b.BytesTo(3)) {
+							usePadding = true
+						} else if segaroConfig.NumberOfTLSPacketToFilter > 0 && b.Len() < 1000 && isApplicationDataMessage(b.BytesTo(3)) {
+							usePadding = true
+							segaroConfig.NumberOfTLSPacketToFilter--
 						}
+					}
+
+					if usePadding {
+						newBuff := segaroAddPadding(b, minSplitSize, maxSplitSize, paddingSize, subChunkSize)
 
 						// Add meta-data at the first of each chunk
 						for _, chunk := range newBuff {

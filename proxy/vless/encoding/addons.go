@@ -72,7 +72,7 @@ func EncodeBodyAddons(writer io.Writer, request *protocol.RequestHeader, request
 	case vless.XRV:
 		w = proxy.NewVisionWriter(w, state, context)
 	case vless.XSV:
-		w = segaro.NewSegaroWriter(w, state, segaroConfig, conn)
+		w = segaro.NewSegaroWriter(w, segaroConfig, conn)
 	}
 	return w
 }

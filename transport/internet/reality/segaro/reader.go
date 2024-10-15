@@ -8,7 +8,6 @@ import (
 	"github.com/luckyluke-a/xray-core/common/buf"
 	"github.com/luckyluke-a/xray-core/common/errors"
 	"github.com/luckyluke-a/xray-core/common/signal"
-	"github.com/luckyluke-a/xray-core/proxy"
 )
 
 var (
@@ -18,22 +17,20 @@ var (
 // SegaroReader is used to read xtls-segaro-vision
 type SegaroReader struct {
 	buf.Reader
-	trafficState *proxy.TrafficState
+}
+
+func NewSegaroReader(reader buf.Reader) *SegaroReader {
+	return &SegaroReader{
+		Reader: reader,
+	}
 }
 
 func (w *SegaroReader) ReadMultiBuffer() (buf.MultiBuffer, error) {
 	return w.Reader.ReadMultiBuffer()
 }
 
-func NewSegaroReader(reader buf.Reader, state *proxy.TrafficState) *SegaroReader {
-	return &SegaroReader{
-		Reader:       reader,
-		trafficState: state,
-	}
-}
-
 // SegaroRead filter and read xtls-segaro-vision
-func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTimer, conn net.Conn, trafficState *proxy.TrafficState, fromInbound bool, segaroConfig *SegaroConfig, xsvCanContinue chan bool) error {
+func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTimer, conn net.Conn, fromInbound bool, segaroConfig *SegaroConfig, xsvCanContinue chan bool) error {
 	defer func() {
 		xsvCanContinue <- false
 	}()
@@ -57,12 +54,53 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 	}
 
 	err = func() error {
-		var totalLength uint16 = 0
+		var totalLength uint16
 		isFirstPacket, isFirstChunk, sendFakePacket, canDecrypt := true, true, true, true
-		recievedFakePacket := false
+		receivedFakePacket := false
 
 		var cacheBuffer *buf.Buffer
 		cacheMultiBuffer := buf.MultiBuffer{}
+
+		processPacket := func(b *buf.Buffer) error {
+			if isFirstChunk {
+				isFirstChunk = false
+				totalLength = binary.BigEndian.Uint16(b.BytesTo(2))
+				b.Advance(2) // Skip total length
+				if fromInbound {
+					fakePaddingLength := binary.BigEndian.Uint16(b.BytesTo(2)) + 2
+					b.Advance(int32(fakePaddingLength)) // Skip fake padding
+					totalLength -= fakePaddingLength
+				}
+			}
+
+			_, err := readFullBuffer(b, &cacheMultiBuffer, &totalLength, fromInbound, paddingSize, subChunkSize)
+			return err
+		}
+
+		writeOrProcess := func() error {
+			if fromInbound {
+				headerContent := binary.BigEndian.Uint16(cacheMultiBuffer[0].BytesTo(2))
+				cacheMultiBuffer[0].Advance(int32(headerContent) + 2) // Skip requestHeader
+				if err := writer.WriteMultiBuffer(cacheMultiBuffer); err != nil {
+					return err
+				}
+			} else {
+				if err := isFakePacketsValid(&cacheMultiBuffer, authKey, clientTime, minServerRandSize); err != nil {
+					return err
+				}
+				for _, buff := range segaroConfig.CacheBuffer {
+					for _, innerBuff := range buff {
+						if _, err := conn.Write(innerBuff.Bytes()); err != nil {
+							return err
+						}
+						innerBuff.Release()
+					}
+				}
+				segaroConfig.CacheBuffer = nil
+				xsvCanContinue <- true // ClientSide
+			}
+			return nil
+		}
 
 		for {
 			buffer, err := reader.ReadMultiBuffer()
@@ -70,55 +108,16 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 				timer.Update()
 				for _, b := range buffer {
 					if isFirstPacket {
-						if isFirstChunk {
-							isFirstChunk = false
-							totalLength = binary.BigEndian.Uint16(b.BytesTo(2))
-							b.Advance(2) // Skip total length
-							if fromInbound {
-								fakePaddingLength := binary.BigEndian.Uint16(b.BytesTo(2)) + 2
-								b.Advance(int32(fakePaddingLength)) // Skip fake padding
-								totalLength -= fakePaddingLength
+						if err := processPacket(b); err == nil {
+							if err := writeOrProcess(); err != nil {
+								return err
 							}
-						}
-
-						err := readFullBuffer(b, &cacheMultiBuffer, &totalLength, fromInbound, paddingSize, subChunkSize)
-						if err == nil {
-							if fromInbound {
-								// Server side
-								headerContent := binary.BigEndian.Uint16(cacheMultiBuffer[0].BytesTo(2))
-								cacheMultiBuffer[0].Advance(int32(headerContent) + 2) // Skip requestHeader
-								if err := writer.WriteMultiBuffer(cacheMultiBuffer); err != nil {
-									return err
-								}
-							} else {
-								// Client side
-								if err := isFakePacketsValid(&cacheMultiBuffer, authKey, clientTime, minServerRandSize); err != nil {
-									return err
-								}
-								// Send cached buffers
-								for _, buff := range trafficState.CacheBuffer {
-									for _, innerBuff := range buff {
-										if _, err := conn.Write(innerBuff.Bytes()); err != nil {
-											return err
-										}
-										innerBuff.Release()
-									}
-								}
-								trafficState.CacheBuffer = nil
-								xsvCanContinue <- true // ClientSide
-							}
-
 							isFirstPacket = false
-
-							// Reset for the next round
 							cacheMultiBuffer = buf.MultiBuffer{}
 							totalLength = 0
-
 						} else if err != continueErr {
 							return err
 						}
-
-						// Send fake packets
 						if fromInbound && sendFakePacket {
 							sendFakePacket = false
 							if err := sendMultipleFakePacket(authKey, &conn, nil, nil, clientTime, minServerRandSize, maxServerRandSize, minServerRandCount, maxServerRandCount, true); err != nil {
@@ -134,32 +133,30 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 								totalLength = binary.BigEndian.Uint16([]byte{cacheBuffer.Byte(0), b.Byte(0)})
 								b.Advance(1)
 								cacheBuffer = nil
+							} else if b.Len() < 2 {
+								cacheBuffer = buf.New()
+								cacheBuffer.Write(b.Bytes())
+								b.Advance(b.Len())
+								continue
 							} else {
-								if b.Len() < 2 {
-									cacheBuffer = buf.New()
-									cacheBuffer.Write(b.Bytes())
-									b.Advance(b.Len())
-									continue
-								}
 								totalLength = binary.BigEndian.Uint16(b.BytesTo(2))
 								b.Advance(2) // Skip total length
 							}
 						}
-						err := readFullBuffer(b, &cacheMultiBuffer, &totalLength, canDecrypt, paddingSize, subChunkSize)
+
+						shouldProcess, err := readFullBuffer(b, &cacheMultiBuffer, &totalLength, canDecrypt, paddingSize, subChunkSize)
 						if err == nil {
-							if recievedFakePacket {
-								recievedFakePacket = false
+							if receivedFakePacket {
+								receivedFakePacket = false
 								canDecrypt = true
 								if err := isFakePacketsValid(&cacheMultiBuffer, authKey, clientTime, minRandSize); err != nil {
 									return err
 								}
-
 							} else {
-								if cacheMultiBuffer[0].Len() > 2 && shouldProcessMessage(cacheMultiBuffer[0].BytesTo(3)) {
-									recievedFakePacket = true
+								if shouldProcess {
+									receivedFakePacket = true
 									canDecrypt = false
 								}
-
 								if err := writer.WriteMultiBuffer(cacheMultiBuffer); err != nil {
 									return err
 								}
@@ -177,7 +174,6 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 			}
 		}
 	}()
-
 	if err != nil && errors.Cause(err) != io.EOF {
 		return err
 	}
@@ -185,19 +181,22 @@ func SegaroRead(reader buf.Reader, writer buf.Writer, timer *signal.ActivityTime
 }
 
 // readFullBuffer, read buffer from multiple chunks and packets
-func readFullBuffer(b *buf.Buffer, cacheMultiBuffer *buf.MultiBuffer, totalLength *uint16, decryptBuff bool, paddingSize, subChunkSize int) error {
-	canRead := false
+func readFullBuffer(b *buf.Buffer, cacheMultiBuffer *buf.MultiBuffer, totalLength *uint16, decryptBuff bool, paddingSize, subChunkSize int) (shouldProcess bool, err error) {
 	decodedBuff := buf.New()
 	*cacheMultiBuffer = append(*cacheMultiBuffer, decodedBuff)
 
 	if *totalLength != 0 {
-		canRead = true
-	} else if b.Len() >= int32(paddingSize)+7 && shouldProcessMessage(b.BytesRange(int32(paddingSize)+4, int32(paddingSize)+7)) {
-		*totalLength = binary.BigEndian.Uint16(b.BytesTo(2))
-		b.Advance(2) // Skip total length bytes
-		canRead = true
+		shouldProcess = true
+	} else if b.Len() >= int32(paddingSize)+7 {
+		from := int32(paddingSize) + 4
+		to := int32(paddingSize) + 7
+		if isHandshakeMessage(b.BytesRange(from, to)) || isApplicationDataMessage(b.BytesRange(from, to)) {
+			*totalLength = binary.BigEndian.Uint16(b.BytesTo(2))
+			b.Advance(2) // Skip total length bytes
+			shouldProcess = true
+		}
 	}
-	if canRead {
+	if shouldProcess {
 		// Accumulate data until we reach the total length
 		remainingLength := int32(*totalLength) - cacheMultiBuffer.Len()
 		if remainingLength > 0 {
@@ -211,7 +210,8 @@ func readFullBuffer(b *buf.Buffer, cacheMultiBuffer *buf.MultiBuffer, totalLengt
 
 			if cacheMultiBuffer.Len() != int32(*totalLength) {
 				// Still not enough data, wait for more
-				return continueErr
+				err = continueErr
+				return
 			}
 		}
 		// All chunks have been loaded into cacheBuffer, now process them
@@ -223,7 +223,8 @@ func readFullBuffer(b *buf.Buffer, cacheMultiBuffer *buf.MultiBuffer, totalLengt
 
 		for len(loadData) > 0 {
 			if len(loadData) < 2 {
-				return errors.New("invalid chunk length, missing data")
+				err = errors.New("invalid chunk length, missing data")
+				return
 			}
 
 			// Read the chunk length
@@ -231,7 +232,8 @@ func readFullBuffer(b *buf.Buffer, cacheMultiBuffer *buf.MultiBuffer, totalLengt
 			loadData = loadData[2:]
 
 			if len(loadData) < int(chunkLength) {
-				return errors.New("incomplete chunk received")
+				err = errors.New("incomplete chunk received")
+				return
 			}
 
 			// Extract the chunk content
@@ -255,5 +257,5 @@ func readFullBuffer(b *buf.Buffer, cacheMultiBuffer *buf.MultiBuffer, totalLengt
 		}
 	}
 
-	return nil
+	return
 }

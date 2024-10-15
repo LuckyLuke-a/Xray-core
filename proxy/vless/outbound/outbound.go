@@ -10,6 +10,7 @@ import (
 	"time"
 	"unsafe"
 
+	utls "github.com/LuckyLuke-a/utls"
 	proxymanOutbound "github.com/luckyluke-a/xray-core/app/proxyman/outbound"
 	"github.com/luckyluke-a/xray-core/common"
 	"github.com/luckyluke-a/xray-core/common/buf"
@@ -32,7 +33,6 @@ import (
 	"github.com/luckyluke-a/xray-core/transport/internet/reality/segaro"
 	"github.com/luckyluke-a/xray-core/transport/internet/stat"
 	"github.com/luckyluke-a/xray-core/transport/internet/tls"
-	utls "github.com/LuckyLuke-a/utls"
 )
 
 func init() {
@@ -191,7 +191,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 		if realityConfig == nil {
 			return errors.New("failed to get reality ConfigFromStreamSettings")
 		}
-		segaroConfig = &segaro.SegaroConfig{RealityConfig: realityConfig}
+		segaroConfig = &segaro.SegaroConfig{RealityConfig: realityConfig, NumberOfTLSPacketToFilter: 3}
 		xsvCanContinue = make(chan bool, 1)
 
 	default:
@@ -308,7 +308,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 		case vless.XRV:
 			serverReader = proxy.NewVisionReader(serverReader, trafficState, ctx)
 		case vless.XSV:
-			serverReader = segaro.NewSegaroReader(serverReader, trafficState)
+			serverReader = segaro.NewSegaroReader(serverReader)
 		}
 		if request.Command == protocol.RequestCommandMux && request.Port == 666 {
 			if requestAddons.Flow == vless.XRV {
@@ -322,7 +322,7 @@ func (h *Handler) Process(ctx context.Context, link *transport.Link, dialer inte
 		case vless.XRV:
 			err = encoding.XtlsRead(serverReader, clientWriter, timer, conn, input, rawInput, trafficState, ob, ctx)
 		case vless.XSV:
-			err = segaro.SegaroRead(serverReader, clientWriter, timer, conn, trafficState, false, segaroConfig, xsvCanContinue)
+			err = segaro.SegaroRead(serverReader, clientWriter, timer, conn, false, segaroConfig, xsvCanContinue)
 		default:
 			// from serverReader.ReadMultiBuffer to clientWriter.WriteMultiBuffer
 			err = buf.Copy(serverReader, clientWriter, buf.UpdateActivity(timer))
