@@ -8,8 +8,8 @@ dmitri.shuralyov.com/service/change v0.0.0-20181023043359-a85b471d5412/go.mod h1
 dmitri.shuralyov.com/state v0.0.0-20180228185332-28bcc343414c/go.mod h1:0PRwlb0D6DFvNNtx+9ybjezNCa8XF0xaYcETyp6rHWU=
 git.apache.org/thrift.git v0.0.0-20180902110319-2566ecd5d999/go.mod h1:fPE2ZNJGynbRyZ4dJvy6G277gSllfV2HJqblrnkyeyg=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/LuckyLuke-a/reality v0.0.0-20241011084154-b0029f95aa83 h1:LRL9Y+Ck+1AgFkxdSpHns/W971dkCDnNMvlgjtcZWaQ=
-github.com/LuckyLuke-a/reality v0.0.0-20241011084154-b0029f95aa83/go.mod h1:DXQMKsVg1rwuj5LY0jOBEzYJhFnXh5q49UEwmjsTA5A=
+github.com/LuckyLuke-a/reality v0.0.0-20241015002528-702c78e0c204 h1:wyp2g1Ha0IKrWfyeh8zq761BWUCBs5Ay4eJdRuqof/k=
+github.com/LuckyLuke-a/reality v0.0.0-20241015002528-702c78e0c204/go.mod h1:DXQMKsVg1rwuj5LY0jOBEzYJhFnXh5q49UEwmjsTA5A=
 github.com/LuckyLuke-a/utls v1.6.8 h1:QM0EOGPCf9rRsxbgwq0nHvUMbW+W5oQGLUCayhgnaVQ=
 github.com/LuckyLuke-a/utls v1.6.8/go.mod h1:lZNzc6MXETBKlDZ8E+t9u6wsb07fdVURBaKI9EFAmB4=
 github.com/OmarTariq612/goech v0.0.0-20240405204721-8e2e1dafd3a0 h1:Wo41lDOevRJSGpevP+8Pk5bANX7fJacO2w04aqLiC5I=

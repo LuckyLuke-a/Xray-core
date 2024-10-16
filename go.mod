@@ -3,7 +3,7 @@ module github.com/luckyluke-a/xray-core
 go 1.21.4
 
 require (
-	github.com/LuckyLuke-a/reality v0.0.0-20241011084154-b0029f95aa83
+	github.com/LuckyLuke-a/reality v0.0.0-20241015002528-702c78e0c204
 	github.com/LuckyLuke-a/utls v1.6.8
 	github.com/OmarTariq612/goech v0.0.0-20240405204721-8e2e1dafd3a0
 	github.com/cloudflare/circl v1.4.0
